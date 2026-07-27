@@ -1,0 +1,9 @@
+{
+  "_doc": "Copy to ~/.claude/tts-voices.json. Keys under 'repos' are absolute repo-root paths (longest prefix match wins). Values are a Higgs preset name (belinda, en_woman, mabel, vex, ...), a voice name from hooks/utils/tts/voices/ (without .wav), or an absolute path to a .wav with a sibling .txt transcript. 'default' applies to any repo not listed.",
+  "default": "belinda",
+  "repos": {
+    "/Users/you/work/backend-api": "en_woman",
+    "/Users/you/side-projects/game": "vex",
+    "/Users/you/.claude": "my-custom-voice"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "_doc": "Merge the `hooks` block into your ~/.claude/settings.json — this wires the spoken recap to the end of every Claude Code turn.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ~/.claude/hooks/stop.py --notify"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+.env
+*.wav
+!examples/**/*.wav
+__pycache__/
+.pytest_cache/
+.DS_Store
