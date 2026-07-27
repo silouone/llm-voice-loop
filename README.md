@@ -8,7 +8,7 @@ Every time **Claude Code** or **Codex** finishes a turn, a natural, expressive v
 
 No model calls, no extra tokens: the recap is **computed deterministically** from the agent's final message by a hook, spoken by [Higgs Audio v3](https://github.com/boson-ai/higgs-audio) (with an offline macOS `say` fallback), and paired with [SuperWhisper](https://superwhisper.com) for the voice-input half. The result is a full hands-free loop: **speak your prompt → the agent works → the agent speaks the result.** Give each agent — and each repo — its own voice, and you know who's talking about what before the first word lands.
 
-Built and battle-tested as part of [my daily agentic harness](https://silou.dev) — the model is the engine; this is part of the harness around it.
+Built and battle-tested as part of my daily agentic harness — the model is the engine; this is part of the harness around it.
 
 ---
 
@@ -208,4 +208,4 @@ Deterministic, no audio, no network — covers the newest-wins coalescing contra
 
 ---
 
-*Part of a larger production agentic harness — hooks, verify gates, observability. More at [silou.dev](https://silou.dev).*
+*Part of a larger production agentic harness — hooks, verify gates, observability.*
