@@ -112,14 +112,17 @@ def truncate_for_speech(text, soft, hard):
     single monster sentence with no terminator anywhere before `hard`."""
     if len(text) <= soft:
         return text
-    finish = re.search(r"[.!?](?=\s|$)", text[soft:hard])
-    if finish:
+    # Slice one char PAST the boundary so the (?=\s|$) lookahead sees the
+    # character after a terminator sitting on it — `$` alone matches the slice
+    # end and would split tokens like `settings.json` straddling the cut.
+    finish = re.search(r"[.!?](?=\s|$)", text[soft:hard + 1])
+    if finish and soft + finish.end() <= hard:
         return text[:soft + finish.end()].strip()
     if len(text) <= hard:
         return text  # nothing sensible to trim to — still within the ceiling
-    cut = text[:soft]
+    cut = text[:soft + 1]
     sentence = re.search(r"^.*[.!?](?=\s|$)", cut, re.DOTALL)
-    if sentence and len(sentence.group(0)) >= soft // 2:
+    if sentence and soft // 2 <= len(sentence.group(0)) <= soft:
         return sentence.group(0).strip()
     return text[:hard].rsplit(" ", 1)[0].strip()
 

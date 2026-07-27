@@ -55,15 +55,22 @@ except ImportError:
 
 
 def fallback_recap(payload: dict[str, Any]) -> str:
+    """Crude recap for when the shared builder is missing (engine not
+    installed): word-capped raw message, still location/name-prefixed so the
+    degraded path sounds like the real one."""
     message = payload.get("last-assistant-message") or payload.get(
         "last_assistant_message"
     )
     message = re.sub(r"\s+", " ", str(message or "")).strip()
-    if not message:
-        return "Turn complete."
-    if len(message) > 220:
+    if len(message) > 220:  # mirrors recap.RECAP_CHAR_CAP, unimportable here
         message = message[:220].rsplit(" ", 1)[0] + "."
-    return message
+    cwd = payload.get("cwd")
+    where = Path(cwd).name if isinstance(cwd, str) and cwd else "this repo"
+    name = os.environ.get("HIGGS_RECAP_NAME", "").strip()
+    prefix = f"{name}, here on {where}, " if name else f"Here on {where}, "
+    if not message:
+        return prefix + "turn complete."
+    return prefix + message[0].lower() + message[1:]
 
 
 def make_recap(payload: dict[str, Any]) -> str:

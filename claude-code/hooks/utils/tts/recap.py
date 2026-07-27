@@ -67,16 +67,16 @@ def _sentences(line: str) -> list[str]:
     return [p.strip() for p in re.findall(r".+?[.!?](?:\s|$)|.+$", line) if p.strip()]
 
 
-def recap_body(message: str, cap: int = RECAP_CHAR_CAP) -> str:
+def recap_body(message: str) -> str:
     """Speakable multi-sentence recap of the final assistant message.
 
     Deterministic, no model call. Drops fenced code blocks, then prefers a
     markdown headline (the first `#`/`##` line) as the opening — it states the
     turn's result and lets us skip any commit/meta preamble above it — falling
     back to the first substantive line when there's no headline. Accumulates
-    following prose sentences up to *cap* (never cutting mid-sentence).
-    Trailing git-diff / summary blocks sit at the bottom, so top-down
-    extraction never reaches them.
+    following prose sentences up to RECAP_CHAR_CAP (never cutting
+    mid-sentence). Trailing git-diff / summary blocks sit at the bottom, so
+    top-down extraction never reaches them.
     """
     if not message:
         return ""
@@ -101,16 +101,16 @@ def recap_body(message: str, cap: int = RECAP_CHAR_CAP) -> str:
 
     out, total, cut_early = [], 0, False
     for s, real in candidates:
-        if out and total + len(s) + 1 > cap:
+        if out and total + len(s) + 1 > RECAP_CHAR_CAP:
             cut_early = True
             break  # always keep the opening, then stop at the cap
         out.append((s, real))
         total += len(s) + 1
 
-    # A budget break right after a terminator-less fragment ("half a bullet")
+    # A budget break right after terminator-less fragments ("half a bullet")
     # sounds like the voice lost its train of thought — better to end one real
-    # sentence early than to speak half a thought.
-    if cut_early and len(out) > 1 and not out[-1][1]:
+    # sentence early than to speak half a thought. The opening always stays.
+    while cut_early and len(out) > 1 and not out[-1][1]:
         out.pop()
 
     joined = " ".join(s for s, _ in out)

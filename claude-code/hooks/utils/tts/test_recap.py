@@ -51,6 +51,14 @@ def test_falls_back_to_sentence_end_in_second_half_of_soft():
     text = lead + " " + ("bb " * 200).strip()            # then a terminator-less flood
     assert truncate_for_speech(text, 220, 400) == lead
 
+def test_token_dot_on_hard_boundary_is_not_a_sentence_end():
+    # "." inside dd.ee sits exactly at hard-1; the lookahead must see the 'e'
+    # AFTER the boundary and reject it, not treat the slice end as end-of-text.
+    text = "aaaa bbbbb ccccc dd.ee fff"                  # "." at index 19
+    out = truncate_for_speech(text, 10, 20)
+    assert out == "aaaa bbbbb ccccc"                     # word-cut, token intact
+    assert not out.endswith("dd.")
+
 
 # ── recap_body: budget break never ends on a pseudo-sentence fragment ────────
 
@@ -62,6 +70,13 @@ def test_budget_break_drops_trailing_fragment():
           "twenty character budget for spoken recaps.")
     out = recap_body(f"{S1}\n{frag}\n{s3}")
     assert out == S1                                     # fragment dropped, not spoken
+
+def test_budget_break_drops_consecutive_trailing_fragments():
+    frag1 = "- " + ("alpha " * 10).strip()               # two terminator-less bullets
+    frag2 = "- " + ("betaa " * 10).strip()
+    s3 = ("Another long bullet sentence that clearly overflows the two hundred "
+          "twenty character budget for spoken recaps.")
+    assert recap_body(f"{S1}\n{frag1}\n{frag2}\n{s3}") == S1
 
 def test_fragment_kept_when_nothing_was_cut():
     out = recap_body(f"{S1}\n- final fragment without any period marker here")
