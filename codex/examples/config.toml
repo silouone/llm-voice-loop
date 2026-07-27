@@ -1,0 +1,5 @@
+# Merge into ~/.codex/config.toml — Codex's native `notify` hook fires this
+# script at the end of every turn (payload type "agent-turn-complete").
+# Use absolute paths; Codex does not expand ~ here.
+
+notify = ["python3", "/Users/you/.codex/hooks/notify_tts.py"]

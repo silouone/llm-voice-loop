@@ -1,63 +1,74 @@
-# 🎙️ Claude Code Voice Loop
+# 🎙️ LLM Voice Loop
 
-**Talk to Claude Code. Claude Code talks back.**
+**Talk to your coding agent. Your coding agent talks back.**
 
-Every time Claude Code finishes a turn, a natural, expressive voice tells you what just happened — while you're across the room, in another window, or deep in another task:
+Every time **Claude Code** or **Codex** finishes a turn, a natural, expressive voice tells you what just happened — while you're across the room, in another window, or deep in another task:
 
 > *"Silou, here on backend-api, the flaky login test is fixed and the suite is green again."*
 
-No model calls, no extra tokens: the recap is **computed deterministically** from Claude's final message by a Stop hook, spoken by [Higgs Audio v3](https://github.com/boson-ai/higgs-audio) (with an offline macOS `say` fallback), and paired with [SuperWhisper](https://superwhisper.com) for the voice-input half. The result is a full hands-free loop: **speak your prompt → Claude works → Claude speaks the result.**
+No model calls, no extra tokens: the recap is **computed deterministically** from the agent's final message by a hook, spoken by [Higgs Audio v3](https://github.com/boson-ai/higgs-audio) (with an offline macOS `say` fallback), and paired with [SuperWhisper](https://superwhisper.com) for the voice-input half. The result is a full hands-free loop: **speak your prompt → the agent works → the agent speaks the result.** Give each agent — and each repo — its own voice, and you know who's talking about what before the first word lands.
 
-Built and battle-tested as part of [my daily Claude Code harness](https://silou.dev) — the model is the engine; this is part of the harness around it.
+Built and battle-tested as part of [my daily agentic harness](https://silou.dev) — the model is the engine; this is part of the harness around it.
 
 ---
 
 ## How it works
 
 ```
-you speak ──► SuperWhisper (local STT) ──► Claude Code prompt
+you speak ──► SuperWhisper (local STT) ──► Claude Code / Codex prompt
                                                │
-                                          Claude works
+                                          the agent works
                                                │
-                                          Stop hook fires
+                              turn ends ───────┤
                                                │
-                            stop.py — computes a ≤220-char spoken recap
-                            (headline-first extraction, strips markdown,
-                             URLs, UUIDs, hex ids — no LLM call)
-                                               │
-                            higgs_tts.py — detaches instantly (~0.1s),
-                            never blocks the turn
-                                               │
-              ┌────────────────────────────────┼──────────────────────┐
-              │                                │                      │
-    tts_coalesce.py                    Higgs Audio v3 API      macOS `say`
-    burst of Stop fires                (Boson hosted, or       (offline
-    → ONE spoken recap,                 your local server)      fallback)
-      the newest                               │
-                                          ffplay playback
-                                          (volume boost, 1.15x speed,
-                                           45s runaway kill-switch)
+        Claude Code: Stop hook ── stop.py      │      Codex: notify ── notify_tts.py
+                       └───────────────┬───────┴──────────────┘
+                                       │
+                     computes a ≤220-char spoken recap
+                     (headline-first extraction, strips markdown,
+                      URLs, UUIDs, hex ids — no LLM call)
+                                       │
+                     higgs_tts.py — ONE shared engine, detaches
+                     instantly (~0.1s), never blocks the turn
+                                       │
+              ┌────────────────────────┼──────────────────────┐
+              │                        │                      │
+    tts_coalesce.py             Higgs Audio v3 API      macOS `say`
+    burst of hook fires         (Boson hosted, or       (offline
+    → ONE spoken recap,          your local server)      fallback)
+      the newest                       │
+                                  ffplay playback
+                                  (volume boost, 1.15x speed,
+                                   45s runaway kill-switch)
 ```
 
 Details that took real-world iteration to get right:
 
-- **Never blocks Claude** — the TTS script re-spawns itself into a detached session and returns in ~0.1s; generation and playback happen while you read the on-screen response.
-- **Newest-wins coalescing** — parallel sessions and Stop-hook re-fires would stack overlapping audio; a global trailing-debounce collapses any burst into exactly one spoken recap (unit-tested, no audio/network needed: `test_tts_coalesce.py`).
+- **Never blocks the agent** — the TTS script re-spawns itself into a detached session and returns in ~0.1s; generation and playback happen while you read the on-screen response.
+- **Newest-wins coalescing** — parallel sessions and hook re-fires would stack overlapping audio; a global trailing-debounce collapses any burst into exactly one spoken recap (unit-tested, no audio/network needed: `test_tts_coalesce.py`).
 - **Speakable text only** — URLs, UUIDs, commit hashes, and digit soup are scrubbed before speech; small human numbers ("5 files", "24h") survive.
-- **Subagents stay silent** — background agents fire the same Stop hook; only the user-facing session speaks.
+- **Subagents stay silent** — background agents fire the same hooks; only the user-facing session speaks.
 - **Graceful degradation** — no API key, no billing, or API down? You still hear the recap via macOS `say`.
 
-## Quickstart
+## Repo layout
 
-**Prereqs:** macOS, [uv](https://docs.astral.sh/uv/), ffmpeg (`brew install ffmpeg`), Claude Code.
+| Path | What it is |
+|---|---|
+| [`claude-code/hooks/`](claude-code/hooks) | Stop hook (`stop.py`) + the **shared TTS engine** (`utils/tts/`) — installs into `~/.claude/` |
+| [`codex/hooks/`](codex/hooks) | Codex `notify` hook (`notify_tts.py`) — installs into `~/.codex/`, reuses the shared engine |
+| [`claude-code/examples/`](claude-code/examples), [`codex/examples/`](codex/examples) | settings.json / config.toml wiring, per-repo voice map, `.env` template |
+
+## Quickstart — Claude Code
+
+**Prereqs:** macOS, [uv](https://docs.astral.sh/uv/), ffmpeg (`brew install ffmpeg`).
 
 ```bash
-# 1. Drop the hooks into your Claude config
-git clone https://github.com/silouone/claude-code-voice-loop.git
-cp -r claude-code-voice-loop/hooks ~/.claude/
+# 1. Drop the hooks (and the shared TTS engine) into your Claude config
+git clone https://github.com/silouone/llm-voice-loop.git
+cp -r llm-voice-loop/claude-code/hooks ~/.claude/
 
 # 2. Wire the Stop hook (merge into ~/.claude/settings.json)
-#    see examples/settings.json
+#    see claude-code/examples/settings.json
 #    "Stop": [{"hooks": [{"type": "command",
 #        "command": "uv run ~/.claude/hooks/stop.py --notify"}]}]
 
@@ -71,6 +82,27 @@ HIGGS_NO_DETACH=true uv run higgs_tts.py "Voice loop is alive."
 ```
 
 Next turn Claude Code finishes, you'll hear it.
+
+## Quickstart — Codex
+
+Codex has a native `notify` mechanism — no plugin needed. The hook reuses the shared engine installed above (Codex-only user? Install `claude-code/hooks/utils/tts/` to `~/.claude/hooks/utils/tts/` anyway, or point `CODEX_TTS_ENGINE` anywhere you like).
+
+```bash
+# 1. Drop the notify hook into your Codex config
+cp -r llm-voice-loop/codex/hooks ~/.codex/
+
+# 2. Wire it (merge into ~/.codex/config.toml — absolute path, ~ not expanded)
+#    notify = ["python3", "/Users/you/.codex/hooks/notify_tts.py"]
+
+# 3. Give Codex its own voice so you can tell the agents apart
+export CODEX_VOICE=en_woman   # or drop a clone clip in ~/.codex/hooks/voices/
+
+# 4. Test with a fake turn payload
+python3 ~/.codex/hooks/notify_tts.py --dry-run \
+  '{"type":"agent-turn-complete","last-assistant-message":"Refactor done, tests green."}'
+```
+
+`CODEX_TTS_ENABLED=0` silences Codex only; `HIGGS_TTS_ENABLED=0` silences everything.
 
 ## The Higgs Audio API (real pricing, July 2026)
 
@@ -103,9 +135,9 @@ echo 'HIGGS_VOICE=en_woman' >> ~/.claude/.env
 echo 'HIGGS_INSTRUCTIONS=speak with bright, jovial energy' >> ~/.claude/.env
 ```
 
-**3. Zero-shot voice cloning** — drop a 10–20s `.wav` + its `.txt` transcript in `hooks/utils/tts/voices/` and reference it in your config. See [`voices/README.md`](hooks/utils/tts/voices/README.md) for the **self-clone trick**: have a preset speak an expressive passage, save it, and use that recording as the reference — the character carries into the clone.
+**3. Zero-shot voice cloning** — drop a 10–20s `.wav` + its `.txt` transcript in `~/.claude/hooks/utils/tts/voices/` and reference it in your config. See [`voices/README.md`](claude-code/hooks/utils/tts/voices/README.md) for the **self-clone trick**: have a preset speak an expressive passage, save it, and use that recording as the reference — the character carries into the clone.
 
-**Per-repo voices** — each project can have its own voice, so you know *which* repo is talking before you hear the first word (`~/.claude/tts-voices.json`, see [`examples/tts-voices.json`](examples/tts-voices.json)):
+**Per-repo voices** — each project can have its own voice, so you know *which* repo is talking before you hear the first word (`~/.claude/tts-voices.json`, see [`examples/tts-voices.json`](claude-code/examples/tts-voices.json)):
 
 ```json
 {
@@ -117,17 +149,19 @@ echo 'HIGGS_INSTRUCTIONS=speak with bright, jovial energy' >> ~/.claude/.env
 }
 ```
 
+**Per-agent voices** — Codex speaks with its own voice on top of all this: `CODEX_VOICE` preset or a clone clip in `codex/hooks/voices/` (see [its README](codex/hooks/voices/README.md)).
+
 ## The input half: SuperWhisper
 
-The loop closes with [SuperWhisper](https://superwhisper.com) — hold a key, talk, and your words land in the Claude Code prompt as text. What matters:
+The loop closes with [SuperWhisper](https://superwhisper.com) — hold a key, talk, and your words land in the agent's prompt as text. What matters:
 
 - **The free version is enough.** Pick a *small* local Whisper model — for spoken prompts to a coding agent it's accurate enough, fast, and fully offline.
-- Bind it to a comfortable push-to-talk key; it types into any focused field, including the Claude Code terminal.
+- Bind it to a comfortable push-to-talk key; it types into any focused field, including the Claude Code and Codex terminals.
 - Dictating prompts is dramatically faster than typing them — and combined with the spoken recap you can run whole iterations without touching the keyboard or looking at the screen.
 
 ## Configuration reference
 
-All optional, all via env (`~/.claude/.env` is loaded explicitly — see [`examples/env.example`](examples/env.example)):
+All optional, all via env (`~/.claude/.env` is loaded explicitly by the engine — see [`env.example`](claude-code/examples/env.example)):
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -141,22 +175,27 @@ All optional, all via env (`~/.claude/.env` is loaded explicitly — see [`examp
 | `HIGGS_MAX_CHARS` | `300` | Hard cap on spoken text length |
 | `HIGGS_MAX_SECONDS` | `45` | Playback kill-switch for runaway generations |
 | `HIGGS_COALESCE_WINDOW` | `5` | Debounce window in s (0 disables) |
-| `HIGGS_TTS_ENABLED` | on | Set `0`/`false`/`off` to silence recaps |
+| `HIGGS_TTS_ENABLED` | on | Set `0`/`false`/`off` to silence ALL recaps |
 | `HIGGS_API_URL` | — | Local/custom `/v1/audio/speech` endpoint (self-host) |
 | `HIGGS_SILENT_MODE` | `false` | Suppress stderr logging |
 | `HIGGS_NO_DETACH` | `false` | Run in foreground (manual testing) |
+| `CODEX_VOICE` | — | Codex-only preset voice |
+| `CODEX_TTS_ENABLED` | on | Silence Codex recaps only |
+| `CODEX_TTS_ENGINE` | `~/.claude/hooks/utils/tts/higgs_tts.py` | Where the shared engine lives |
+| `CODEX_NOTIFY_FORWARD` | — | Chain the raw payload to another notifier executable |
 
 ## Troubleshooting
 
 - **Hearing the robotic `say` voice instead of Higgs** → no key, no billing (429 `insufficient_quota`), or the API is down. Run with `HIGGS_NO_DETACH=true` to see the actual error.
 - **`ffplay not found`** → `brew install ffmpeg`.
+- **Codex is silent** → check the `notify` path in `~/.codex/config.toml` is absolute, and test with `--dry-run` (prints the recap instead of speaking).
 - **Two voices overlapping** → shouldn't happen (coalescing); if you disabled it with `HIGGS_COALESCE_WINDOW=0`, re-enable it.
-- **Nothing plays at all** → check `HIGGS_TTS_ENABLED` isn't set to a falsey value, and test the script directly in the foreground.
+- **Nothing plays at all** → check `HIGGS_TTS_ENABLED` isn't set to a falsey value, and test the engine directly in the foreground.
 
 ## Tests
 
 ```bash
-cd hooks/utils/tts && uv run test_tts_coalesce.py
+cd claude-code/hooks/utils/tts && uv run test_tts_coalesce.py
 ```
 
 Deterministic, no audio, no network — covers the newest-wins coalescing contract, stale-token recovery, and the off-switch gate.
@@ -169,4 +208,4 @@ Deterministic, no audio, no network — covers the newest-wins coalescing contra
 
 ---
 
-*Part of a larger production Claude Code harness — hooks, verify gates, observability. More at [silou.dev](https://silou.dev).*
+*Part of a larger production agentic harness — hooks, verify gates, observability. More at [silou.dev](https://silou.dev).*
