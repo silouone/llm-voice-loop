@@ -88,7 +88,8 @@ def get_text():
     return "The first move is what sets everything in motion."
 
 
-MAX_CHARS_DEFAULT = 300  # last-resort cap for ANY caller; stop.py's recap is tighter
+MAX_CHARS_DEFAULT = 300       # soft target for ANY caller; the recap builder is tighter
+MAX_CHARS_HARD_DEFAULT = 400  # ceiling: a sentence in progress may finish up to here
 
 
 def sanitize_for_speech(text):
@@ -104,16 +105,23 @@ def sanitize_for_speech(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-def truncate_for_speech(text, limit):
-    """Hard cap the spoken text, cutting at a sentence end when one lands in
-    the second half of the budget, else at a word boundary."""
-    if len(text) <= limit:
+def truncate_for_speech(text, soft, hard):
+    """Budget the spoken text without chopping thoughts: past `soft`, let the
+    sentence in progress finish (up to `hard`); then prefer ending at the last
+    complete sentence; cutting at a word boundary is the LAST resort, for a
+    single monster sentence with no terminator anywhere before `hard`."""
+    if len(text) <= soft:
         return text
-    cut = text[:limit]
-    sentence = re.search(r"^.*[.!?]", cut, re.DOTALL)
-    if sentence and len(sentence.group(0)) >= limit // 2:
+    finish = re.search(r"[.!?](?=\s|$)", text[soft:hard])
+    if finish:
+        return text[:soft + finish.end()].strip()
+    if len(text) <= hard:
+        return text  # nothing sensible to trim to — still within the ceiling
+    cut = text[:soft]
+    sentence = re.search(r"^.*[.!?](?=\s|$)", cut, re.DOTALL)
+    if sentence and len(sentence.group(0)) >= soft // 2:
         return sentence.group(0).strip()
-    return cut.rsplit(" ", 1)[0].strip()
+    return text[:hard].rsplit(" ", 1)[0].strip()
 
 
 def say_fallback(text):
@@ -205,7 +213,9 @@ def main():
     - HIGGS_INSTRUCTIONS: Optional delivery instructions (e.g. 'speak softly and warmly')
     - HIGGS_VOLUME_BOOST: Volume boost in dB (default: 10)
     - HIGGS_SPEED: Playback speed multiplier, pitch preserved (default: 1.15, range 0.5-2.0)
-    - HIGGS_MAX_CHARS: Hard cap on spoken text length (default: 300, min 40)
+    - HIGGS_MAX_CHARS: Soft cap on spoken text length (default: 300, min 40)
+    - HIGGS_MAX_CHARS_HARD: Ceiling the in-progress sentence may finish up to
+      (default: 400; never below HIGGS_MAX_CHARS)
     - HIGGS_MAX_SECONDS: Hard cap on playback duration (default: 45, min 5)
     - HIGGS_SILENT_MODE: 'true' to suppress stderr logging
     - HIGGS_SAVE_AUDIO: Optional path to also save the generated audio
@@ -221,9 +231,12 @@ def main():
         return
 
     # Sanitize + cap ONCE, up front: every downstream path (Higgs endpoints,
-    # `say` fallbacks) speaks the same bounded, ID-free text.
-    max_chars = max(40, int(float(os.getenv('HIGGS_MAX_CHARS', str(MAX_CHARS_DEFAULT)))))
-    text = truncate_for_speech(sanitize_for_speech(get_text()), max_chars)
+    # `say` fallbacks) speaks the same bounded, ID-free text. The soft/hard
+    # split means text the recap builder already shaped is never re-chopped
+    # mid-sentence here — one budget, applied once.
+    soft = max(40, int(float(os.getenv('HIGGS_MAX_CHARS', str(MAX_CHARS_DEFAULT)))))
+    hard = max(soft, int(float(os.getenv('HIGGS_MAX_CHARS_HARD', str(MAX_CHARS_HARD_DEFAULT)))))
+    text = truncate_for_speech(sanitize_for_speech(get_text()), soft, hard)
     if not text:
         text = "Turn complete."
 

@@ -88,5 +88,9 @@ def resolve_voice(cwd: str | None = None) -> dict:
 
 
 def display_name(name: str | None) -> str:
-    """Short badge label (handy if you surface the active voice in a status line)."""
-    return name if name else "?"
+    """Short badge label (handy if you surface the active voice in a status
+    line): agent-prefixed clip names ('claude-amy', 'codex-anna') lose the
+    prefix."""
+    if not name:
+        return "?"
+    return name.removeprefix("claude-").removeprefix("codex-")

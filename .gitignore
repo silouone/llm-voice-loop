@@ -1,6 +1,8 @@
 .env
-*.wav
-!examples/**/*.wav
 __pycache__/
 .pytest_cache/
 .DS_Store
+logs/
+# personal voice clips live here on the author's machine but never publish
+**/voices/*
+!**/voices/README.md

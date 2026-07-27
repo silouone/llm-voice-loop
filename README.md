@@ -47,6 +47,7 @@ Details that took real-world iteration to get right:
 - **Never blocks the agent** — the TTS script re-spawns itself into a detached session and returns in ~0.1s; generation and playback happen while you read the on-screen response.
 - **Newest-wins coalescing** — parallel sessions and hook re-fires would stack overlapping audio; a global trailing-debounce collapses any burst into exactly one spoken recap (unit-tested, no audio/network needed: `test_tts_coalesce.py`).
 - **Speakable text only** — URLs, UUIDs, commit hashes, and digit soup are scrubbed before speech; small human numbers ("5 files", "24h") survive.
+- **Never stops mid-thought** — the budget is soft-target/hard-ceiling: past the 220-char target the sentence in progress may finish (up to 400), a budget break never ends on a half-bullet fragment, and word-boundary cutting is the last resort for a terminator-less monster sentence. One shared recap builder (`recap.py`) serves both agents, so behavior never drifts.
 - **Subagents stay silent** — background agents fire the same hooks; only the user-facing session speaks.
 - **Graceful degradation** — no API key, no billing, or API down? You still hear the recap via macOS `say`.
 
@@ -95,7 +96,9 @@ cp -r llm-voice-loop/codex/hooks ~/.codex/
 #    notify = ["python3", "/Users/you/.codex/hooks/notify_tts.py"]
 
 # 3. Give Codex its own voice so you can tell the agents apart
-export CODEX_VOICE=en_woman   # or drop a clone clip in ~/.codex/hooks/voices/
+#    (Codex runs the hook with a bare environment, so config goes in ~/.codex/.env)
+echo 'CODEX_VOICE=en_woman' >> ~/.codex/.env   # or drop a clone clip in ~/.codex/hooks/voices/
+echo 'HIGGS_RECAP_NAME=YourFirstName' >> ~/.codex/.env
 
 # 4. Test with a fake turn payload
 python3 ~/.codex/hooks/notify_tts.py --dry-run \
@@ -172,7 +175,8 @@ All optional, all via env (`~/.claude/.env` is loaded explicitly by the engine �
 | `HIGGS_INSTRUCTIONS` | — | Delivery direction ("speak softly and warmly") |
 | `HIGGS_SPEED` | `1.15` | Playback speed, pitch preserved (0.5–2.0) |
 | `HIGGS_VOLUME_BOOST` | `10` | Volume boost in dB |
-| `HIGGS_MAX_CHARS` | `300` | Hard cap on spoken text length |
+| `HIGGS_MAX_CHARS` | `300` | Soft cap on spoken text length |
+| `HIGGS_MAX_CHARS_HARD` | `400` | Ceiling the in-progress sentence may finish up to |
 | `HIGGS_MAX_SECONDS` | `45` | Playback kill-switch for runaway generations |
 | `HIGGS_COALESCE_WINDOW` | `5` | Debounce window in s (0 disables) |
 | `HIGGS_TTS_ENABLED` | on | Set `0`/`false`/`off` to silence ALL recaps |
@@ -195,10 +199,10 @@ All optional, all via env (`~/.claude/.env` is loaded explicitly by the engine �
 ## Tests
 
 ```bash
-cd claude-code/hooks/utils/tts && uv run test_tts_coalesce.py
+cd claude-code/hooks/utils/tts && uv run test_tts_coalesce.py && uv run test_recap.py
 ```
 
-Deterministic, no audio, no network — covers the newest-wins coalescing contract, stale-token recovery, and the off-switch gate.
+Deterministic, no audio, no network — covers the newest-wins coalescing contract, stale-token recovery, the off-switch gate, the sentence-aware speech budget, and the recap builder.
 
 ## License & credits
 

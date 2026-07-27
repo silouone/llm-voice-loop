@@ -5,10 +5,11 @@ Codex calls this via the native `notify` setting in ~/.codex/config.toml:
 
     notify = ["python3", "/Users/you/.codex/hooks/notify_tts.py"]
 
-The recap is COMPUTED from the last assistant message — no model call — and
-spoken through the shared Higgs Audio TTS engine (installed with the Claude
-Code half of this repo under ~/.claude/hooks/utils/tts/, or anywhere via
-CODEX_TTS_ENGINE). Falls back to macOS `say` when the engine is missing.
+The recap comes from the SAME shared builder as the Claude Code Stop hook
+(recap.py, beside the TTS engine under ~/.claude/hooks/utils/tts/ or wherever
+CODEX_TTS_ENGINE points) — deterministic, no model call. Falls back to macOS
+`say` when the engine is missing. Codex runs this with a bare environment, so
+config lives in ~/.codex/.env (simple KEY=VALUE lines, loaded at start).
 """
 
 from __future__ import annotations
@@ -23,11 +24,52 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_TTS_ENGINE = (
-    Path.home() / ".claude" / "hooks" / "utils" / "tts" / "higgs_tts.py"
-)
+def load_env_file(path: Path) -> None:
+    """Minimal .env loader (no deps): KEY=VALUE lines, '#' comments; existing
+    environment variables win."""
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+load_env_file(Path.home() / ".codex" / ".env")
+
+ENGINE = Path(
+    os.environ.get("CODEX_TTS_ENGINE")
+    or Path.home() / ".claude" / "hooks" / "utils" / "tts" / "higgs_tts.py"
+).expanduser()
 VOICES_DIR = Path(__file__).resolve().parent / "voices"
-RECAP_CHAR_CAP = 220
+
+sys.path.insert(0, str(ENGINE.parent))
+try:
+    from recap import build_recap  # the shared, agent-agnostic recap builder
+except ImportError:
+    build_recap = None  # engine not installed — degrade to a crude recap
+
+
+def fallback_recap(payload: dict[str, Any]) -> str:
+    message = payload.get("last-assistant-message") or payload.get(
+        "last_assistant_message"
+    )
+    message = re.sub(r"\s+", " ", str(message or "")).strip()
+    if not message:
+        return "Turn complete."
+    if len(message) > 220:
+        message = message[:220].rsplit(" ", 1)[0] + "."
+    return message
+
+
+def make_recap(payload: dict[str, Any]) -> str:
+    if build_recap is not None:
+        return build_recap(payload)
+    return fallback_recap(payload)
 
 
 def enabled(name: str, default: bool = True) -> bool:
@@ -35,107 +77,6 @@ def enabled(name: str, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"", "0", "false", "no", "off"}
-
-
-def repo_name(cwd: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip()).name.lstrip(".") or "this repo"
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return Path(cwd).name.lstrip(".") or "this repo"
-
-
-def clean_line(raw: str) -> str:
-    line = raw.strip().lstrip("#>-*+• \t")
-    line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
-    line = re.sub(r"(?:https?://|www\.)[^\s)\]>\"']+", " ", line)
-    line = re.sub(
-        r"\s+\b(?:see|at|via)\s*[.:;]?\s*$", "", line, flags=re.IGNORECASE
-    )
-    line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
-    line = re.sub(r"`([^`]+)`", r"\1", line)
-    line = re.sub(
-        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
-        r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
-        " ",
-        line,
-    )
-    line = re.sub(r"\b(?=[0-9a-fA-F]*\d)[0-9a-fA-F]{7,}\b", " ", line)
-    line = re.sub(r"\b\d(?:[.,]?\d){4,}\w*\b", " ", line)
-    line = re.sub(r"[^\w\s.,;:!?'\"()—-]", "", line)
-    line = re.sub(r"\s+([.,;:!?])", r"\1", line)
-    line = re.sub(r"[:;]\s*\.", ".", line)
-    return re.sub(r"\s+", " ", line).strip()
-
-
-def recap_body(message: str) -> str:
-    if not message:
-        return "turn complete."
-
-    text = re.sub(r"```.*?```", " ", message, flags=re.DOTALL)
-    lines = text.splitlines()
-    start = next(
-        (index for index, raw in enumerate(lines) if raw.lstrip().startswith("#")),
-        0,
-    )
-
-    sentences: list[str] = []
-    for raw in lines[start:]:
-        line = clean_line(raw)
-        if len(re.sub(r"[^A-Za-z]", "", line)) < 12:
-            continue
-        parts = re.findall(r".+?[.!?](?:\s|$)|.+$", line)
-        for part in parts:
-            sentence = part.strip()
-            if not sentence:
-                continue
-            if len(re.findall(r"\d", sentence)) * 2 > len(
-                re.findall(r"[A-Za-z]", sentence)
-            ):
-                continue
-            sentences.append(
-                sentence if sentence[-1] in ".!?" else sentence + "."
-            )
-
-    chosen: list[str] = []
-    total = 0
-    for sentence in sentences:
-        if chosen and total + len(sentence) + 1 > RECAP_CHAR_CAP:
-            break
-        chosen.append(sentence)
-        total += len(sentence) + 1
-    return " ".join(chosen) or "turn complete."
-
-
-def build_recap(payload: dict[str, Any]) -> str:
-    cwd = payload.get("cwd")
-    cwd = cwd if isinstance(cwd, str) and cwd else os.getcwd()
-    message = payload.get("last-assistant-message")
-    if not isinstance(message, str):
-        message = payload.get("last_assistant_message")
-    body = recap_body(message if isinstance(message, str) else "")
-    name = os.environ.get("HIGGS_RECAP_NAME", "").strip()
-    prefix = (
-        f"{name}, here on {repo_name(cwd)}, "
-        if name
-        else f"Here on {repo_name(cwd)}, "
-    )
-    if re.match(r"^\w+, here on ", body, flags=re.IGNORECASE):
-        return body
-    opening = (
-        body
-        if len(body) > 1 and body[:2].isupper()
-        else body[0].lower() + body[1:]
-    )
-    return prefix + opening
 
 
 def detached(
@@ -191,15 +132,13 @@ def speak(recap: str, cwd: str | None = None) -> None:
     if cwd and not Path(cwd).is_dir():
         cwd = None
 
-    configured = os.environ.get("CODEX_TTS_ENGINE")
-    engine = Path(configured).expanduser() if configured else DEFAULT_TTS_ENGINE
     uv = (
         os.environ.get("CODEX_TTS_UV")
         or shutil.which("uv")
         or str(Path.home() / ".local" / "bin" / "uv")
     )
 
-    if engine.is_file() and Path(uv).is_file():
+    if ENGINE.is_file() and Path(uv).is_file():
         tts_env = os.environ.copy()
         preset, ref = codex_voice()
         if preset:
@@ -209,7 +148,7 @@ def speak(recap: str, cwd: str | None = None) -> None:
             tts_env.pop("HIGGS_VOICE", None)
             tts_env["HIGGS_VOICE_REF"] = ref
         detached(
-            [uv, "run", "--script", str(engine), recap],
+            [uv, "run", "--script", str(ENGINE), recap],
             cwd=cwd,
             env=tts_env,
         )
@@ -239,13 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     raw_payload = args[-1]
     payload = parse_payload(raw_payload)
     if dry_run:
-        print(build_recap(payload))
+        print(make_recap(payload))
         return 0
 
     forward_original(raw_payload)
     if payload.get("type") == "agent-turn-complete":
         cwd = payload.get("cwd")
-        speak(build_recap(payload), cwd if isinstance(cwd, str) else None)
+        speak(make_recap(payload), cwd if isinstance(cwd, str) else None)
     return 0
 
 
